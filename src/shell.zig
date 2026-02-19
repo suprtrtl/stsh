@@ -56,11 +56,11 @@ pub const Shell = struct {
     stderr: *std.Io.Writer,
     stdin: *std.Io.Reader,
 
-    stdin_buf: []u8,
+    stdin_buf: []u8 = undefined,
 
-    status: Status,
+    status: Status = .Ok,
 
-    cwd: [std.Io.Dir.max_path_bytes]u8,
+    cwd: [std.Io.Dir.max_path_bytes]u8 = undefined,
     cwd_len: usize = undefined,
 
     aliases: std.StringHashMap([]const u8),
@@ -75,8 +75,6 @@ pub const Shell = struct {
             .stderr = stderr,
             .stdin = stdin,
             .stdin_buf = stdin_buf,
-            .status = .Ok,
-            .cwd = undefined,
             .aliases = map,
         };
     }
@@ -106,6 +104,8 @@ pub const Shell = struct {
 
             const args: []const []const u8 = tokens_buf[0..arg_cnt];
             status = try self.execute(args);
+
+            _ = self.set_cwd();
         }
     }
 
@@ -125,14 +125,6 @@ pub const Shell = struct {
         }
 
         return i;
-    }
-
-    fn replace_env(allocator: std.mem.Allocator, buf: *[][]const u8) void {
-        for (buf, 0..) |token, i| {
-            if (token[0] == '$') {
-                std.process.Environ.contains(.empty, allocator, buf[i]);
-            }
-        }
     }
 
     fn launch(self: Shell, argv: []const []const u8) !Status {
@@ -206,7 +198,6 @@ pub const Shell = struct {
 
                 const err_code = std.os.linux.chdir(path);
                 if (err_code == 0) {
-                    _ = shell.set_cwd();
                     return .Ok;
                 }
 
@@ -253,7 +244,7 @@ pub const Shell = struct {
         var iter = shell.aliases.iterator();
 
         while (iter.next()) |entry| {
-            std.debug.print("{s}: {s}\n", .{entry.key_ptr.*, entry.value_ptr.*});
+            std.debug.print("{s}: {s}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
         }
 
         return .Ok;
