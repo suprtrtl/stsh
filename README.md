@@ -17,7 +17,7 @@ Written on the latest dev branch of Zig so patching will probably be required as
 
 Idk why this project needs a roadmap but here we are
 
-- [ ] Aliases
+- [x] Aliases
 - [ ] Shell scripts (reading and executing files written in stsh)
 - [ ] `source` command
 - [ ] Various other builtins
