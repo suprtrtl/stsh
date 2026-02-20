@@ -19,7 +19,7 @@ pub const Builtin = struct {
     }
 };
 
-pub const sh_builtins: [6]Builtin = [_]Builtin{
+pub const sh_builtins: [7]Builtin = [_]Builtin{
     Builtin{
         .name = "exit",
         .desc = "exits the shell",
@@ -46,6 +46,7 @@ pub const sh_builtins: [6]Builtin = [_]Builtin{
         .func = Shell.pwd,
     },
     Builtin{ .name = "alias", .desc = "set shell alias", .func = Shell.alias },
+    Builtin{ .name = "palias", .desc = "prints current aliases in shell", .func = Shell.print_alias },
 };
 
 pub const Shell = struct {
@@ -101,8 +102,8 @@ pub const Shell = struct {
 
             if (line.len == 0) continue;
 
-            var tokens_buf = try self.allocator.alloc([]const u8, line.len);
-            const arg_cnt = try parse_line(line, &tokens_buf);
+            var tokens_buf = try self.allocator.alloc([]const u8, 2048);
+            const arg_cnt = try self.parse_line(line, &tokens_buf);
 
             const args: []const []const u8 = tokens_buf[0..arg_cnt];
             status = try self.execute(args);
@@ -116,23 +117,38 @@ pub const Shell = struct {
     }
 
     /// Returns number of arguments
-    fn parse_line(line: []const u8, buf: *[][]const u8) !usize {
-        var it = std.mem.tokenizeAny(u8, line, "\n \r");
+    fn parse_line(self: *Shell, line: []const u8, buf: *[][]const u8) !usize {
+        var iter = std.mem.tokenizeAny(u8, line, "\n \r");
         var i: usize = 0;
-        while (it.next()) |token| : (i += 1) {
+
+        // Could not use the : (i += 1) syntax, caused int overflow
+        while (iter.next()) |token| {
             if (i >= buf.*.len) return error.OutOfTokenSpace;
+
+            if (self.is_alias(token)) |value| {
+                var alias_iter = std.mem.tokenizeAny(u8, value, " ");
+
+                // Could not use the : (i += 1) syntax, caused int overflow
+                while (alias_iter.next()) |alias_token| {
+                    if (i >= buf.*.len) return error.OutOfTokenSpace;
+
+                    buf.*[i] = alias_token;
+                    i += 1;
+                }
+
+                continue;
+            }
+
             buf.*[i] = token;
+            i += 1;
         }
 
         return i;
     }
 
-    fn replace_env(allocator: std.mem.Allocator, buf: *[][]const u8) void {
-        for (buf, 0..) |token, i| {
-            if (token[0] == '$') {
-                std.process.Environ.contains(.empty, allocator, buf[i]);
-            }
-        }
+    /// Returns an optional if alias returns the value of alias
+    fn is_alias(self: *Shell, arg: []const u8) ?[]const u8 {
+        return self.aliases.get(arg);
     }
 
     fn launch(self: *Shell, argv: []const []const u8) !Status {
@@ -233,27 +249,54 @@ pub const Shell = struct {
         return .Ok;
     }
 
+    // TODO: MAKE THIS CLEANER
+    /// Sets a new shell alias
     fn alias(shell: *Shell, args: []const []const u8) !Status {
-        if (args.len == 1) {
-            try shell.stdout.print("KEY: ", .{});
-            const key_line = try shell.read_line();
+        switch (args.len) {
+            1 => {
+                // make sure the key line does not have any spaces
+                const key_line = keybreak: while (true) {
+                    try shell.stdout.print("KEY: ", .{});
+                    const line = try shell.read_line();
 
-            const key = try shell.allocator.alloc(u8, key_line.len);
-            @memcpy(key, key_line);
+                    for (line) |char| {
+                        if (char == ' ' or char == '\r') {
+                            try shell.stderr.print("Please Input a key containing no whitespace\n", .{});
+                            continue :keybreak;
+                        }
+                    }
 
-            try shell.stdout.print("VALUE: ", .{});
-            const value_line = try shell.read_line();
+                    break :keybreak line;
+                };
 
-            const value = try shell.allocator.alloc(u8, value_line.len);
-            @memcpy(value, value_line);
+                const key = try shell.allocator.alloc(u8, key_line.len);
+                @memcpy(key, key_line);
 
-            try shell.aliases.put(key, value);
+                try shell.stdout.print("VALUE: ", .{});
+                const value_line = try shell.read_line();
+
+                const value = try shell.allocator.alloc(u8, value_line.len);
+                @memcpy(value, value_line);
+
+                try shell.aliases.put(key, value);
+            },
+            else => |len| {
+                try shell.stderr.print("sh: {d} args are currently not supported for the \"alias\" command\n", .{len});
+            },
         }
+
+        return .Ok;
+    }
+
+    fn print_alias(shell: *Shell, args: []const []const u8) !Status {
+        _ = args;
 
         var iter = shell.aliases.iterator();
 
+        try shell.stdout.print("Aliases:\n", .{});
+
         while (iter.next()) |entry| {
-            std.debug.print("{s}: {s}\n", .{entry.key_ptr.*, entry.value_ptr.*});
+            try shell.stdout.print("{s} -> {s}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
         }
 
         return .Ok;
