@@ -56,11 +56,11 @@ pub const Shell = struct {
     stderr: *std.Io.Writer,
     stdin: *std.Io.Reader,
 
-    stdin_buf: []u8 = undefined,
+    stdin_buf: []u8,
 
-    status: Status = .Ok,
+    status: Status,
 
-    cwd: [std.Io.Dir.max_path_bytes]u8 = undefined,
+    cwd: [std.Io.Dir.max_path_bytes]u8,
     cwd_len: usize = undefined,
 
     aliases: std.StringHashMap([]const u8),
@@ -75,6 +75,8 @@ pub const Shell = struct {
             .stderr = stderr,
             .stdin = stdin,
             .stdin_buf = stdin_buf,
+            .status = .Ok,
+            .cwd = undefined,
             .aliases = map,
         };
     }
@@ -104,12 +106,10 @@ pub const Shell = struct {
 
             const args: []const []const u8 = tokens_buf[0..arg_cnt];
             status = try self.execute(args);
-
-            _ = self.set_cwd();
         }
     }
 
-    fn read_line(self: Shell) ![]const u8 {
+    fn read_line(self: *Shell) ![]const u8 {
         const bare_line = (try self.stdin.takeDelimiter('\n')).?;
         const line = std.mem.trim(u8, bare_line, "\r");
         return line;
@@ -127,7 +127,15 @@ pub const Shell = struct {
         return i;
     }
 
-    fn launch(self: Shell, argv: []const []const u8) !Status {
+    fn replace_env(allocator: std.mem.Allocator, buf: *[][]const u8) void {
+        for (buf, 0..) |token, i| {
+            if (token[0] == '$') {
+                std.process.Environ.contains(.empty, allocator, buf[i]);
+            }
+        }
+    }
+
+    fn launch(self: *Shell, argv: []const []const u8) !Status {
         var child: std.process.Child = std.process.spawn(self.io, .{ .argv = argv }) catch |err| {
             try self.stderr.print("sh: {s}\n", .{@errorName(err)});
             return .StdErr;
@@ -139,9 +147,9 @@ pub const Shell = struct {
         return .Ok;
     }
 
-    fn execute(self: Shell, args: []const []const u8) !Status {
+    fn execute(self: *Shell, args: []const []const u8) !Status {
         inline for (sh_builtins) |sh_builtin| {
-            if (std.mem.eql(u8, args[0], sh_builtin.name)) return sh_builtin.execute(@constCast(&self), args);
+            if (std.mem.eql(u8, args[0], sh_builtin.name)) return sh_builtin.execute(@constCast(self), args);
         }
 
         return self.launch(args);
@@ -198,6 +206,7 @@ pub const Shell = struct {
 
                 const err_code = std.os.linux.chdir(path);
                 if (err_code == 0) {
+                    _ = shell.set_cwd();
                     return .Ok;
                 }
 
@@ -244,7 +253,7 @@ pub const Shell = struct {
         var iter = shell.aliases.iterator();
 
         while (iter.next()) |entry| {
-            std.debug.print("{s}: {s}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
+            std.debug.print("{s}: {s}\n", .{entry.key_ptr.*, entry.value_ptr.*});
         }
 
         return .Ok;
