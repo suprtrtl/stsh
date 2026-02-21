@@ -86,6 +86,15 @@ pub const Shell = struct {
         };
     }
 
+    fn check_compatibility(self: *Shell) !void {
+        const os_tag = builtin.os.tag;
+        if (os_tag == .linux) return;
+
+        try self.stderr.print("sh: does not support current operating system: {any}\nExiting...\n", .{os_tag});
+
+        std.process.exit(1);
+    }
+
     fn set_cwd(self: *Shell) usize {
         const cwd_len = std.os.linux.getcwd(&self.cwd, std.Io.Dir.max_path_bytes);
         self.cwd_len = cwd_len;
@@ -98,7 +107,7 @@ pub const Shell = struct {
 
         _ = self.set_cwd();
 
-        _ = self.is_env("garbage");
+        try self.check_compatibility();
 
         while (status == .Ok or status == .StdErr) {
             try self.stdout.print("{s} > ", .{self.cwd[0..self.cwd_len]});
@@ -158,12 +167,12 @@ pub const Shell = struct {
         return i;
     }
 
-
     /// Returns an optional if alias returns the value of alias
     fn is_alias(self: *Shell, arg: []const u8) ?[]const u8 {
         return self.aliases.get(arg);
     }
 
+    /// Returns an optional if exists returns value as []const u8
     fn is_env(self: *Shell, arg: []const u8) ?[]const u8 {
         if (arg[0] != '$') return null;
         return self.env_vars.get(arg[1..]);
@@ -215,10 +224,6 @@ pub const Shell = struct {
 
         try shell.stdout.print("\nuse man pages for more info on other commands\n\n", .{});
 
-        if (builtin.os.tag != .linux) {
-            try shell.stdout.print("please use linux for all of the features of stsh\ncurrent os: {any}", .{builtin.os.tag});
-        }
-
         return .Ok;
     }
 
@@ -232,33 +237,25 @@ pub const Shell = struct {
         // std.debug.print("{any}\n", .{args[1]});
         //
 
-        switch (comptime builtin.os.tag) {
-            .linux => {
-                var path: [*:0]u8 = try shell.allocator.allocSentinel(u8, args[1].len + 1, 0);
-                @memcpy(path[0..args[1].len], args[1]);
-                path[args[1].len] = 0;
+        var path: [*:0]u8 = try shell.allocator.allocSentinel(u8, args[1].len + 1, 0);
+        @memcpy(path[0..args[1].len], args[1]);
+        path[args[1].len] = 0;
 
-                const err_code = std.os.linux.chdir(path);
-                if (err_code == 0) {
-                    _ = shell.set_cwd();
-                    return .Ok;
-                }
-
-                // pretify the errors
-                const err = std.os.linux.errno(err_code);
-                switch (err) {
-                    .NOENT => try shell.stderr.print("sh: No such file or directory\n", .{}),
-
-                    else => try shell.stderr.print("sh: {any} with error code: {}\n", .{ std.os.linux.errno(err_code), err_code }),
-                }
-
-                return .StdErr;
-            },
-            else => {
-                try shell.stderr.print("sh: {any} not supported for \"cd\"", .{comptime builtin.os.tag});
-                return .StdErr;
-            },
+        const err_code = std.os.linux.chdir(path);
+        if (err_code == 0) {
+            _ = shell.set_cwd();
+            return .Ok;
         }
+
+        // pretify the errors
+        const err = std.os.linux.errno(err_code);
+        switch (err) {
+            .NOENT => try shell.stderr.print("sh: No such file or directory\n", .{}),
+
+            else => try shell.stderr.print("sh: {any} with error code: {}\n", .{ std.os.linux.errno(err_code), err_code }),
+        }
+
+        return .StdErr;
     }
 
     fn pwd(shell: *Shell, args: []const []const u8) !Status {
