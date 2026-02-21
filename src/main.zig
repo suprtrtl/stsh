@@ -23,7 +23,7 @@ pub fn main(init: std.process.Init) !void {
     var stdin_reader = std.Io.File.stdin().reader(io, stdin_buf);
     const stdin = &stdin_reader.interface;
     
-    var sh = try shell.Shell.init(io, stdout, stderr, stdin_buf, stdin, allocator);
+    var sh = try shell.Shell.init(io, stdout, stderr, stdin_buf, stdin, allocator, init.environ_map);
 
     try stdout.print("Hello World!\n", .{});
 

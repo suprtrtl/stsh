@@ -65,9 +65,12 @@ pub const Shell = struct {
     cwd_len: usize = undefined,
 
     aliases: std.StringHashMap([]const u8),
+    env_vars: std.process.Environ.Map,
 
-    pub fn init(io: std.Io, stdout: *std.Io.Writer, stderr: *std.Io.Writer, stdin_buf: []u8, stdin: *std.Io.Reader, allocator: std.mem.Allocator) !Shell {
+    pub fn init(io: std.Io, stdout: *std.Io.Writer, stderr: *std.Io.Writer, stdin_buf: []u8, stdin: *std.Io.Reader, allocator: std.mem.Allocator, env_map: *std.process.Environ.Map) !Shell {
         const map = std.StringHashMap([]const u8).init(allocator);
+
+        const env_clone = try env_map.clone(allocator);
 
         return Shell{
             .io = io,
@@ -79,6 +82,7 @@ pub const Shell = struct {
             .status = .Ok,
             .cwd = undefined,
             .aliases = map,
+            .env_vars = env_clone,
         };
     }
 
@@ -93,6 +97,8 @@ pub const Shell = struct {
         var status: Status = .Ok;
 
         _ = self.set_cwd();
+
+        _ = self.is_env("garbage");
 
         while (status == .Ok or status == .StdErr) {
             try self.stdout.print("{s} > ", .{self.cwd[0..self.cwd_len]});
@@ -125,6 +131,12 @@ pub const Shell = struct {
         while (iter.next()) |token| {
             if (i >= buf.*.len) return error.OutOfTokenSpace;
 
+            if (self.is_env(token)) |value| {
+                buf.*[i] = value;
+                i += 1;
+                continue;
+            }
+
             if (self.is_alias(token)) |value| {
                 var alias_iter = std.mem.tokenizeAny(u8, value, " ");
 
@@ -146,9 +158,15 @@ pub const Shell = struct {
         return i;
     }
 
+
     /// Returns an optional if alias returns the value of alias
     fn is_alias(self: *Shell, arg: []const u8) ?[]const u8 {
         return self.aliases.get(arg);
+    }
+
+    fn is_env(self: *Shell, arg: []const u8) ?[]const u8 {
+        if (arg[0] != '$') return null;
+        return self.env_vars.get(arg[1..]);
     }
 
     fn launch(self: *Shell, argv: []const []const u8) !Status {
