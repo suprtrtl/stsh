@@ -90,7 +90,7 @@ pub const Shell = struct {
         const os_tag = builtin.os.tag;
         if (os_tag == .linux) return;
 
-        try self.stderr.print("sh: does not support current operating system: {any}\nExiting...\n", .{os_tag});
+        try self.stderr.print("stsh: does not support current operating system: {any}\nExiting...\n", .{os_tag});
 
         std.process.exit(1);
     }
@@ -180,7 +180,11 @@ pub const Shell = struct {
 
     fn launch(self: *Shell, argv: []const []const u8) !Status {
         var child: std.process.Child = std.process.spawn(self.io, .{ .argv = argv }) catch |err| {
-            try self.stderr.print("sh: {s}\n", .{@errorName(err)});
+            switch (err) {
+                error.FileNotFound => try self.stderr.print("stsh: command \"{s}\" not found\n", .{argv[0]}),
+                error.AccessDenied => try self.stderr.print("stsh: permsion denied: \"{s}\"\n", .{argv[0]}),
+                else => try self.stderr.print("stsh: {s}\n", .{@errorName(err)}),
+            }
             return .StdErr;
         };
 
@@ -230,7 +234,7 @@ pub const Shell = struct {
     /// Change Directory
     fn cd(shell: *Shell, args: []const []const u8) !Status {
         if (args.len <= 1) {
-            try shell.stderr.print("sh: expected argument to \"cd\"\n", .{});
+            try shell.stderr.print("stsh: expected argument to \"cd\"\n", .{});
             return .StdErr;
         }
 
@@ -250,9 +254,9 @@ pub const Shell = struct {
         // pretify the errors
         const err = std.os.linux.errno(err_code);
         switch (err) {
-            .NOENT => try shell.stderr.print("sh: No such file or directory\n", .{}),
+            .NOENT => try shell.stderr.print("stsh: No such file or directory\n", .{}),
 
-            else => try shell.stderr.print("sh: {any} with error code: {}\n", .{ std.os.linux.errno(err_code), err_code }),
+            else => try shell.stderr.print("stsh: {any} with error code: {}\n", .{ std.os.linux.errno(err_code), err_code }),
         }
 
         return .StdErr;
@@ -296,7 +300,7 @@ pub const Shell = struct {
                 try shell.aliases.put(key, value);
             },
             else => |len| {
-                try shell.stderr.print("sh: {d} args are currently not supported for the \"alias\" command\n", .{len});
+                try shell.stderr.print("stsh: {d} args are currently not supported for the \"alias\" command\n", .{len});
             },
         }
 
